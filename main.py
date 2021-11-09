@@ -1,4 +1,4 @@
-
+import argparse
 from fake_useragent import UserAgent
 import aiohttp
 import asyncio
@@ -13,23 +13,38 @@ import time
 from selenium import webdriver
 import sys
 import shutil
+import requests
 
 ua = UserAgent()
 header = ua.random
-headers = {'User-Agent': header}
+headers = {
+    # 'User-Agent': header,
+    'Accept-Encoding': '',
+    'Content-Type': 'text/html; charset=utf-8',
+    'Connection': 'close',
+    'Vary': 'Origin',
+    'Access-Control-Allow-Credentials': 'true',
+    'Cache-Control': 'no-store',
+    'Pragma': 'no-cache',
+    'N-SID': 'bOxk8bwER_9Dh8egc12vD8_U6XNTGW3Y',
+    # 'Set-Cookie': 'sid=s%3AYUhjdwWV4KykrNy8dxYggVT7vpSILdFS.KeYp75uD6bFj20Q3wYkmNRUuRSkZNB5BFgPVea6hQJc; Domain=huaban.com; Path=/; HttpOnly',
+}
 # 获取网页中所有图片对应的pin
 def get_pins(url_):
     agent = "User-Agent={}".format(header)
     options = webdriver.ChromeOptions()
     options.add_argument('headless')
     options.add_argument(agent)
-    driver = webdriver.Chrome(chrome_options=options)
-    driver.get(url_)
+    try:
+        driver = webdriver.Chrome(chrome_options=options, executable_path='chromedriver.exe')
+        driver.get(url_)
+        js1 = "window.scrollTo(0,document.body.scrollHeight);"
+        js2 = "h=document.documentElement.scrollTop; return h"
+        pattern = re.compile(r'data-id=?"(\d*)"')
+        origin_top = driver.execute_script(js2)
+    except Exception as e:
+        easygui.msgbox(msg=e, title=' ', ok_button='OK', image=None, root=None)
 
-    js1 = "window.scrollTo(0,document.body.scrollHeight);"
-    js2 = "h=document.documentElement.scrollTop; return h"
-    pattern = re.compile(r'data-id=?"(\d*)"')
-    origin_top = driver.execute_script(js2)
     pins_ = set()
     # 可以使用大括号 { } 或者 set() 函数创建集合，但是注意如果创建一个空集合必须用 set() 而不是 { }，因为{}是用来表示空字典类型的。
     while True:
@@ -50,7 +65,9 @@ def get_pins(url_):
 # 获取页面html
 def get_html_1(url_):
     try:
-        page = urllib.request.urlopen(url_)
+        req = urllib.request.Request(url_,headers=headers)
+        page = urllib.request.urlopen(req)
+        print("---urllib-headers--", page.info())
     except urllib.error.URLError:
         return 'fail'
     html_ = page.read().decode('utf-8')
@@ -62,6 +79,7 @@ async def fetch(url):
         async with session.get(url, headers=headers, verify_ssl=False) as resp:
         # 1.如果想要得到结果，则必须使用await关键字等待请求结束，如果没有await关键字，得到的是一个生成器
         # 2.text()返回的是字符串的文本，read()返回的是二进制的文本
+            print("==aiohttp==headers:", resp.headers)
             data = await resp.text()
             # print('data', data)
             return data
@@ -75,14 +93,14 @@ def get_image(path_, pin_list):
         # 获取跳转网页网址
         url_str = r'http://huaban.com/pins/%s/' % pinId
         
-    #     task = asyncio.ensure_future(fetch(url_str))
-    #     tasks.append(task)
-    # results = loop.run_until_complete(asyncio.wait(tasks))
+        task = asyncio.ensure_future(fetch(url_str))
+        tasks.append(task)
+    results = loop.run_until_complete(asyncio.wait(tasks))
 
-    # for item in results[0]:
+    for item in results[0]:
         # 获取点击图片时弹出网页的源码
-        pinId_source = get_html_1(url_str)
-        # pinId_source = item.result()
+        # pinId_source = get_html_1(url_str)
+        pinId_source = item.result()
         # print("---pinId_source:", pinId_source)
         # print("---pinId_source type:", type(pinId_source))
         if pinId_source == 'fail':
@@ -93,10 +111,13 @@ def get_image(path_, pin_list):
         <div class="main-image"><div class="image-holder" id="baidu_image_holder">
         <img src="//hbimg.huabanimg.com/64369267b9c8dc7a43da81457658c05b1a752f9329ec0-dSfdfl_fw658/format/webp"
         '''
-        img_url_re = re.compile('main-image.*?src="(.*?)"', re.S)
-        img_url_list = re.findall(img_url_re, pinId_source)
-        img_url = 'http:' + img_url_list[0]
-
+        try:
+            img_url_re = re.compile('main-image.*?src="(.*?)"', re.S)
+            img_url_list = re.findall(img_url_re, pinId_source)
+            img_url = 'http:' + img_url_list[0]
+        except IndexError as e:
+            print('获取数据不合法')
+            continue
         try:
             urllib.request.urlretrieve(img_url, path_ + '\%s.jpg' % x)  # urlretrieve()方法直接将远程数据下载到本地
         except urllib.error.URLError:
@@ -140,7 +161,7 @@ def main():
     get_image(path, pins)
     easygui.msgbox(msg='下载完成', title=' ', ok_button='OK', image=None, root=None)
 
-def test(path_='D:\Glory\HuaBan\\34130626', pin_list=["1143629013"]):
+def test_aiohttp(path_='D:\Glory\HuaBan\\34130626', pin_list=["1143629013"]):
     loop = asyncio.get_event_loop()
     tasks = []
     x = 1
@@ -151,12 +172,34 @@ def test(path_='D:\Glory\HuaBan\\34130626', pin_list=["1143629013"]):
         tasks.append(task)
     results = loop.run_until_complete(asyncio.wait(tasks))
 
-    # print("---results:", results)
     for item in results[0]:
         # 获取点击图片时弹出网页的源码
-        # pinId_source = get_html_1(url_str)
         pinId_source = item.result()
-        print("---pinId_source:", pinId_source)
+        # print("---pinId_source:", pinId_source)
+        if pinId_source == 'fail':
+            continue
+        # print("---headers:", pinId_source.head)
+        img_url_re = re.compile('main-image.*?src="(.*?)"', re.S)
+        img_url_list = re.findall(img_url_re, pinId_source)
+        print('--img_url_list:', img_url_list)
+        img_url = 'http:' + img_url_list[0]
+        try:
+            urllib.request.urlretrieve(img_url, path_ + '\%s.jpg' % x)  # urlretrieve()方法直接将远程数据下载到本地
+        except urllib.error.URLError:
+            print("获取失败！%s" % img_url)
+            continue
+        print("获取成功！%s" % img_url)
+        x += 1
+
+def test_urllib(path_='D:\Glory\HuaBan\\34130626', pin_list=["1143629013"]):
+    loop = asyncio.get_event_loop()
+    tasks = []
+    x = 1
+    for pinId in pin_list:
+        # 获取跳转网页网址
+        url_str = r'https://huaban.com/pins/%s/' % pinId
+        pinId_source = get_html_1(url_str)
+        # print("---pinId_source:", pinId_source)
         if pinId_source == 'fail':
             continue
         img_url_re = re.compile('main-image.*?src="(.*?)"', re.S)
@@ -172,5 +215,17 @@ def test(path_='D:\Glory\HuaBan\\34130626', pin_list=["1143629013"]):
         x += 1
 
 if __name__ == '__main__':
-    main()
-    # test()
+    parser = argparse.ArgumentParser(description='Test for argparse')
+    parser.add_argument('--test', '-t', help='初始化user,默认False', action="store_true")
+    parser.add_argument('--options', '-o', help='选择测试目标', default="aiohttp")
+
+    args = parser.parse_args()
+    if args.test:
+        if args.options == 'aiohttp':
+            print('测试aiohttp')
+            test_aiohttp()
+        else:
+            print('测试urllib')
+            test_urllib()
+    else:
+        main()
